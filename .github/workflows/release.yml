@@ -1,0 +1,234 @@
+# Taken from Herbie:
+# https://github.com/herbie-fp/herbie/blob/400891fe4c89f0cee051b8e03089a01ab9016f4b/.github/workflows/release.yml
+name: Generate Lakeroad release
+
+on:
+  push:
+    tags:
+    - 'v*'
+  workflow_dispatch:
+  # DO NOT MERGE: we are just including this so that we can test the release
+  # while working on the PR.
+  pull_request:
+
+env:
+  LAKEROAD_DIR: ${{ github.workspace }}/lakeroad_checkout
+  RELEASE_DIR: ${{ github.workspace }}/lakeroad
+  RACKET_PKG_DIR: /home/runner/.local/share/racket/8.11/pkgs
+  MAKE_JOBS: 2
+
+jobs:
+  build:
+    name: Build
+    strategy:
+      # manual matrix: I think this was an easy way to make (os, os-name) pairs.
+      matrix:
+        include:
+          # - os: windows-latest
+          #   os-name: windows
+          - os: ubuntu-latest
+            os-name: ubuntu
+          # - os: macos-latest
+          #   os-name: macOS
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: ${{ env.LAKEROAD_DIR }}
+
+      - name: Install Racket
+        uses: Bogdanp/setup-racket@v1.11
+        with:
+          version: 8.11
+      
+      - name: Set up Racket dependencies
+        run: raco pkg install --auto --batch rosette yaml
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10' 
+
+      - name: Install Python dependencies
+        run: pip install -r ${{ env.LAKEROAD_DIR }}/requirements.txt && pip install pyinstaller
+
+      - name: Build solvers and copy into Rosette (Ubuntu)
+        if: matrix.os-name == 'ubuntu'
+        run: |
+          source ${{ env.LAKEROAD_DIR }}/dependencies.sh
+          
+          sudo apt-get update
+
+          # Put dummy versions of cvc4 and boolector into Rosette.
+          mkdir -p ${{ env.RACKET_PKG_DIR }}/rosette/bin/
+          cat >${{ env.RACKET_PKG_DIR }}/rosette/bin/cvc4 <<'EOF'
+          #!/bin/bash
+          echo "Please do not use cvc4 with Lakeroad."
+          exit 1
+          EOF
+          chmod +x ${{ env.RACKET_PKG_DIR }}/rosette/bin/cvc4
+          cat >${{ env.RACKET_PKG_DIR }}/rosette/bin/boolector <<'EOF'
+          #!/bin/bash
+          echo "Please do not use boolector with Lakeroad."
+          exit 1
+          EOF
+          chmod +x ${{ env.RACKET_PKG_DIR }}/rosette/bin/boolector
+
+          # Build Bitwuzla.
+          sudo apt-get install -y ninja-build
+          mkdir bitwuzla
+          wget -qO- https://github.com/bitwuzla/bitwuzla/archive/$BITWUZLA_COMMIT_HASH.tar.gz | tar xz -C bitwuzla --strip-components=1
+          cd bitwuzla
+          ./configure.py --prefix=${{ env.RELEASE_DIR }}/deps/bitwuzla/
+          cd build
+          ninja -j${{ env.MAKE_JOBS }}
+          ninja -j${{ env.MAKE_JOBS }} install
+          cd ../..
+          ln -s ${{ env.RELEASE_DIR }}/deps/bitwuzla/bin/bitwuzla ${{ env.RACKET_PKG_DIR }}/rosette/bin/bitwuzla
+
+          # Build STP.
+          sudo apt install -y patchelf
+          sudo apt-get install -y git cmake bison flex libboost-all-dev python2 perl
+          mkdir stp && cd stp
+          wget -qO- https://github.com/stp/stp/archive/$STP_COMMIT_HASH.tar.gz | tar xz --strip-components=1
+          ./scripts/deps/setup-gtest.sh
+          ./scripts/deps/setup-outputcheck.sh
+          ./scripts/deps/setup-cms.sh
+          ./scripts/deps/setup-minisat.sh
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=${{ env.RELEASE_DIR }}/deps/stp/ ..
+          make -j ${{ env.MAKE_JOBS }}
+          make -j ${{ env.MAKE_JOBS }} install
+          cd ../..
+          ln -s ${{ env.RELEASE_DIR }}/deps/stp/bin/stp ${{ env.RACKET_PKG_DIR }}/rosette/bin/stp
+          # It seems wrong that we need to do this manually. Shouldn't they be
+          # installed during install?
+          cp stp/deps/install/lib/*.so* ${{ env.RELEASE_DIR }}/deps/stp/lib/
+          patchelf --set-rpath '$ORIGIN/../lib' ${{ env.RELEASE_DIR }}/deps/stp/lib/*so*
+          patchelf --set-rpath '$ORIGIN/../lib' ${{ env.RELEASE_DIR }}/deps/stp/bin/stp
+
+          # Build CVC5.
+          pip install pyparsing
+          mkdir cvc5 && cd cvc5
+          wget -qO- https://github.com/cvc5/cvc5/archive/$CVC5_COMMIT_HASH.tar.gz  | tar xz --strip-components=1
+          ./configure.sh --auto-download --prefix=${{ env.RELEASE_DIR }}/deps/cvc5/
+          cd ./build
+          make -j ${{ env.MAKE_JOBS }}
+          make -j ${{ env.MAKE_JOBS }} install
+          cd ../..
+          ln -s ${{ env.RELEASE_DIR }}/deps/cvc5/bin/cvc5 ${{ env.RACKET_PKG_DIR }}/rosette/bin/cvc5
+          # Manually set the RPATH. Would be nice to do this in a cleaner way.
+          patchelf --set-rpath '$ORIGIN/../lib' ${{ env.RELEASE_DIR }}/deps/cvc5/lib/*so*
+          patchelf --set-rpath '$ORIGIN/../lib' ${{ env.RELEASE_DIR }}/deps/cvc5/bin/cvc5
+
+        
+          # Build Yices2.
+          sudo apt-get install -y gperf
+          mkdir yices2 && cd yices2
+          wget -qO- https://github.com/SRI-CSL/yices2/archive/$YICES2_COMMIT_HASH.tar.gz | tar xz --strip-components=1
+          autoconf
+          ./configure --prefix=${{ env.RELEASE_DIR }}/deps/yices/
+          make -j ${{ env.MAKE_JOBS }}
+          make -j ${{ env.MAKE_JOBS }} install
+          cd ..
+          ln -s ${{ env.RELEASE_DIR }}/deps/yices/bin/yices-smt2 ${{ env.RACKET_PKG_DIR }}/rosette/bin/yices-smt2
+
+      - name: Run PyInstaller
+        run: pyinstaller --onefile --name lakeroad ${{ env.LAKEROAD_DIR }}/bin/lakeroad-portfolio.py
+
+      - name: Run `raco exe` and `raco distribute` on `bin/main.rkt`
+        run: |
+          mkdir -p ${{ env.RELEASE_DIR }}/deps/lakeroad/
+          raco exe -v -o lakeroad-single-solver ${{ env.LAKEROAD_DIR }}/bin/main.rkt
+          raco distribute -v ${{ env.RELEASE_DIR }}/deps/lakeroad/ lakeroad-single-solver
+
+      - name: Clean up issues after `raco distribute` (Ubuntu)
+        if: matrix.os-name == 'ubuntu'
+        run: |
+          # Re-link the solvers.
+          # Due to this behavior in Racket:
+          # https://github.com/racket/racket/issues/4945
+          # we need to re-link the solvers after `raco distribute`. Distribute
+          # copies the solvers into the `bin` directory, but it copies the
+          # executables themselves, not the symbolic links. The copied
+          # executables have broken RPATHS. So simply re-link.
+          #
+          # Also it's important that these links are relative so that they're
+          # relocatable.
+          rm ${{ env.RELEASE_DIR }}/deps/lakeroad/lib/plt/lakeroad-single-solver/exts/ert/r1/bin/{stp,yices-smt2,cvc5,bitwuzla}
+          ln -f -s ../../../../../../../../yices/bin/yices-smt2  "${{ env.RELEASE_DIR }}/deps/lakeroad/lib/plt/lakeroad-single-solver/exts/ert/r1/bin/yices-smt2"
+          ln -f -s ../../../../../../../../stp/bin/stp  "${{ env.RELEASE_DIR }}/deps/lakeroad/lib/plt/lakeroad-single-solver/exts/ert/r1/bin/stp"
+          ln -f -s ../../../../../../../../cvc5/bin/cvc5  "${{ env.RELEASE_DIR }}/deps/lakeroad/lib/plt/lakeroad-single-solver/exts/ert/r1/bin/cvc5"
+          ln -f -s ../../../../../../../../bitwuzla/bin/bitwuzla  "${{ env.RELEASE_DIR }}/deps/lakeroad/lib/plt/lakeroad-single-solver/exts/ert/r1/bin/bitwuzla"
+
+      - name: Create zip (Windows)
+        if: matrix.os-name == 'windows'
+        run: |
+          7z a lakeroad-${{ matrix.os-name }}.zip lakeroad-single-solver.exe
+          # TODO(@gussmith23): Get SHA on Windows.
+          # sha256sum lakeroad-${{ matrix.os-name }}.zip > lakeroad-${{ matrix.os-name }}.zip.CHECKSUM
+
+      - name: Create zip (Linux, macOS)
+        if: matrix.os-name == 'ubuntu' || matrix.os-name == 'macOS'
+        run: |
+          mkdir -p ${{ env.RELEASE_DIR }}
+
+          mkdir -p ${{ env.RELEASE_DIR }}/bin
+          cat >${{ env.RELEASE_DIR }}/bin/lakeroad <<'EOF'
+          #!/bin/bash
+          SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+          "$SCRIPT_DIR/../deps/lakeroad/bin/lakeroad" \
+            --lakeroad-executable-filepath "$SCRIPT_DIR/../deps/lakeroad/bin/lakeroad-single-solver" \
+            $@
+          EOF
+          chmod +x ${{ env.RELEASE_DIR }}/bin/lakeroad
+
+          cp dist/lakeroad ${{ env.RELEASE_DIR }}/deps/lakeroad/bin/lakeroad
+
+          # Important to preserve symbolic links here, otherwise the work we do
+          # to fix the RPATH in the solvers is useless.
+          zip --symlinks -r lakeroad-${{ matrix.os-name }}.zip lakeroad
+          # TODO(@gussmith23): Doesn't work on Mac, may need to have one case for each OS.
+          # sha256sum lakeroad-${{ matrix.os-name }}.zip > lakeroad-${{ matrix.os-name }}.zip.CHECKSUM
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          path: lakeroad-${{ matrix.os-name }}.zip
+          name: lakeroad-${{ matrix.os-name }}.zip
+          if-no-files-found: error
+
+      # TODO(@gussmith23): Re-enable once we generate SHA on Windows.
+      # - name: Upload checksum
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     path: lakeroad-${{ matrix.os-name }}.zip.CHECKSUM
+      #     name: lakeroad-${{ matrix.os-name }}.zip.CHECKSUM
+      #     if-no-files-found: error
+
+  release:
+    name: Create Initial Release
+    runs-on: ubuntu-latest
+    needs: build
+    
+    steps:
+      - name: Download pre-built artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: lakeroad-*
+          merge-multiple: true
+
+      - name: Create Release
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ github.ref }}
+          name: ${{ github.ref }}
+          commit: ${{ github.commit }}
+          draft: true
+          prerelease: false
+          artifactErrorsFailBuild: true
+          artifacts: "artifacts/*"
