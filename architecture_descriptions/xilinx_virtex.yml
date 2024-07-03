@@ -1,0 +1,140 @@
+implementations:
+  -interface: {name: DSP, parameters: {out-width: 48, a-width: 30, b-width: 18, c-width: 48, d-width: 25}}
+    internal_data: {
+      ## REGISTER CONTROL ATTRIBUTES
+      ACASCREG: 2,
+      ADREG: 1,
+      ALUMODEREG: 1,
+      AREG: 2,
+      BCASCREG: 2,
+      BREG: 2,
+      CARRYINREG: 1,
+      CARRYINSELREG: 1,
+      CREG: 1,
+      DREG: 1,
+      INMODEREG: 1,
+      MREG: 1,
+      OPMODEREG: 1,
+      PREG: 1,
+      ## FEATURE CONTROL ATTRIBUTES
+      A_INPUT: 5,
+      B_INPUT: 5,
+      USE_DPORT: 5,
+      USE_MULT: 5,
+      USE_SIMD: 5,
+      ## PATTERN DETECTION ATTRIBUTES
+      AUTORESET_PATDET: 5,
+      MASK: 48,
+      PATTERN: 48,
+      SEL_MASK: 5,
+      SEL_PATTERN: 5,
+      USE_PATTERN_DETECT: 5,
+
+      ## Ports
+      INMODE: 5,
+      CARRYIN: 1,
+      OPMODE: 7,
+      CARRYINSEL: 3,
+      BCIN: 18,
+      ACIN: 30,
+      ALUMODE: 4,
+      PCIN: 48,
+      CARRYCASCIN: 1,
+      MULTSIGNIN: 1,
+    }
+    constraints : []
+    modules:
+      - module_name: DSP48E1
+        instance_name: DSP48E1
+        filepath: unused
+        racket_import_filepath: unused
+        ports:
+          [
+            # dsp interface ports
+            { name: A, direction: input, bitwidth: 30, value: A },
+            { name: B, direction: input, bitwidth: 18, value: B },
+            { name: C, direction: input, bitwidth: 48, value: C },
+            { name: D, direction: input, bitwidth : 25, value: D },
+            { name: CLK, direction: input, bitwidth: 1, value: clk },
+            # cascaded input from previous dsp48e1, we're not chaining so we set to 0.
+            { name: ACIN, direction: input, bitwidth: 30,  value: ACIN },
+            { name: ALUMODE, direction: input, bitwidth: 4, value: ALUMODE },
+            { name: BCIN, direction: input, bitwidth: 18, value: BCIN },
+            { name: CARRYCASCIN, direction: input, bitwidth: 1, value: CARRYCASCIN },
+            { name: CARRYIN, direction: input, bitwidth: 1, value: CARRYIN },
+            { name: CARRYINSEL, direction: input, bitwidth: 3, value: CARRYINSEL },
+            { name: INMODE, direction: input, bitwidth: 5, value: INMODE },
+            { name: MULTSIGNIN, direction: input, bitwidth: 1, value: MULTSIGNIN },
+            { name: OPMODE, direction: input, bitwidth: 7, value: OPMODE },
+            { name: PCIN, direction: input, bitwidth: 48, value: PCIN },
+            # Resets can be set to 0 safely
+            { name: RSTA, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTALLCARRYIN, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTALUMODE, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTB, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTC, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTCTRL, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTD, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTINMODE, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTM, direction: input, bitwidth: 1, value: (bv 0 1) },
+            { name: RSTP, direction: input, bitwidth: 1, value: (bv 0 1) },
+            
+            #CLK enables can be set to 1
+            { name: CEA1, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEA2, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEAD, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEALUMODE, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEB1, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEB2, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEC, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CECARRYIN, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CECTRL, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CED, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEINMODE, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEM, direction: input, bitwidth: 1, value: (bv 1 1) },
+            { name: CEP, direction: input, bitwidth: 1, value: (bv 1 1) },
+            
+            { name: P, direction: output, bitwidth: 48, value: P },
+          ]
+        parameters:
+          [
+            ## Register Control attributes
+            { name: ACASCREG, value: (zero-extend AREG (bitvector 32)) },
+            { name: ADREG, value: (zero-extend ADREG (bitvector 32)) },
+            { name: ALUMODEREG, value: (zero-extend ALUMODEREG (bitvector 32)) },
+            { name: AREG, value: (zero-extend AREG (bitvector 32))},
+            { name: BCASCREG, value: (zero-extend BREG (bitvector 32)) },
+            { name: BREG, value : (zero-extend BREG (bitvector 32)) },
+            { name: CARRYINREG, value: (bv 0 32) },
+            { name: CARRYINSELREG, value: (zero-extend CARRYINSELREG (bitvector 32)) },
+            { name: CREG, value: (zero-extend CREG (bitvector 32)) },
+            { name: DREG, value: (zero-extend DREG (bitvector 32)) },
+            { name: INMODEREG, value: (zero-extend INMODEREG (bitvector 32)) },
+            { name: MREG, value: (zero-extend MREG (bitvector 32)) },
+            { name: OPMODEREG, value: (zero-extend OPMODEREG (bitvector 32)) },
+            { name: PREG, value: (zero-extend PREG (bitvector 32)) },
+
+            ## Feature Control Attributes
+            # Direct
+            { name: A_INPUT, value: (bv 1 5) }
+            { name: B_INPUT, value: (bv 1 5) }
+            # True
+            { name: USE_DPORT, value: (bv 9 5) }
+            # Multiply
+            { name: USE_MULT, value: (bv 5 5) }
+            # One48
+            { name: USE_SIMD, value: (bv 7 5) }
+
+            ## Pattern Detection Attributes
+            # NO_RESET
+            {name: AUTORESET_PATDET, value: (bv 0 5) },
+            {name: MASK, value: (bv 0 48) },
+            {name: PATTERN, value: (bv 0 48) },
+            # MASK
+            {name: SEL_MASK, value: (bv 2 5) },
+            # PATTERN
+            {name: SEL_PATTERN, value: (bv 3 5) },
+            # NO_PATDET
+            {name: USE_PATTERN_DETECT, value: (bv 6 5) },
+          ]
+    outputs: { O : (get DSP48E1 P) }
